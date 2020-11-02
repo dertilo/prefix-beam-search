@@ -33,9 +33,9 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 
     # STEP 1: Initiliazation
     O = ""
-    Pb, Pnb = defaultdict(Counter), defaultdict(Counter)
-    Pb[0][O] = 1
-    Pnb[0][O] = 0
+    pb_b, pNb_b = Counter(), Counter()
+    pb_b[O] = 1.0
+    pNb_b[O] = 0.0
     prefixes = [O]
     # END: STEP 1
 
@@ -43,10 +43,8 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
     for time_step in range(1, T):
         character_probs = ctc[time_step]
         pruned_alphabet = [alphabet[i] for i in np.where(character_probs > prune)[0]]
-        pb_t = Pb[time_step]
-        pNb_t = Pnb[time_step]
-        pb_b = Pb[time_step - 1]
-        pNb_b = Pnb[time_step - 1]
+
+        pb_t, pNb_t = Counter(), Counter()
 
         for pref in prefixes:
 
@@ -99,5 +97,7 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
         sorter = lambda l: A_next[l] * (len(W(l)) + 1) ** beta
         prefixes = sorted(A_next, key=sorter, reverse=True)[:k]
         # END: STEP 7
+        pb_b = pb_t
+        pNb_b = pNb_t
 
     return prefixes[0].strip(">")
