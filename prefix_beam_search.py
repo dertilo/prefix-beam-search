@@ -20,15 +20,15 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
             string: The decoded CTC output.
     """
 
-    lm = (
-        (lambda l: 1) if lm is None else lm
-    )  # if no LM is provided, just set to function returning 1
+    # if no LM is provided, just set to function returning 1
+    lm = (lambda l: 1) if lm is None else lm
     W = lambda l: re.findall(r"\w+[\s|>]", l)
-    alphabet = list(ascii_lowercase) + [" ", ">", "%"]
+    BLANK = "%"
+    alphabet = list(ascii_lowercase) + [" ", ">", BLANK]
+    BLANK_IDX = alphabet.index(BLANK)
     F = ctc.shape[1]
-    ctc = np.vstack(
-        (np.zeros(F), ctc)
-    )  # just add an imaginative zero'th step (will make indexing more intuitive)
+    # just add an imaginative zero'th step (will make indexing more intuitive)
+    ctc = np.vstack((np.zeros(F), ctc))
     T = ctc.shape[0]
 
     # STEP 1: Initiliazation
@@ -54,8 +54,8 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
                 # END: STEP 2
 
                 # STEP 3: “Extending” with a blank
-                if c == "%":
-                    Pb[t][l] += ctc[t][-1] * (Pb[t - 1][l] + Pnb[t - 1][l])
+                if c == BLANK:
+                    Pb[t][l] += ctc[t][BLANK_IDX] * (Pb[t - 1][l] + Pnb[t - 1][l])
                 # END: STEP 3
 
                 # STEP 4: Extending with the end character
@@ -78,7 +78,7 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 
                     # STEP 6: Make use of discarded prefixes
                     if l_plus not in A_prev:
-                        Pb[t][l_plus] += ctc[t][-1] * (
+                        Pb[t][l_plus] += ctc[t][BLANK_IDX] * (
                             Pb[t - 1][l_plus] + Pnb[t - 1][l_plus]
                         )
                         Pnb[t][l_plus] += ctc[t][c_ix] * Pnb[t - 1][l_plus]
