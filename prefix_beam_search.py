@@ -1,3 +1,4 @@
+import pickle
 from collections import defaultdict, Counter
 from string import ascii_lowercase
 import re
@@ -5,18 +6,40 @@ from typing import NamedTuple, Dict, List
 
 import numpy as np
 
-from test import LanguageModel
+
+class LanguageModel(object):
+    """
+    Loads a dictionary mapping between prefixes and probabilities.
+    """
+
+    def __init__(self, lm_file):
+        """
+        Initializes the language model.
+
+        Args:
+          lm_file (str): Path to dictionary mapping between prefixes and lm probabilities.
+        """
+        lm = pickle.load(open(lm_file, "rb"))
+        self._model = defaultdict(lambda: 1e-11, lm)
+
+    def __call__(self, prefix):
+        """
+        Returns the probability of the last word conditioned on all previous ones.
+
+        Args:
+          prefix (str): The sentence prefix to be scored.
+        """
+        return self._model[prefix]
 
 
 class Search(NamedTuple):
-    alpha:float
-    beta:float
-    BLANK:str
-    BLANK_IDX:int
-    lm:LanguageModel
-    ctc:np.ndarray
-    alphabet:List[str]
-    prune:float
+    alpha: float
+    beta: float
+    BLANK: str
+    BLANK_IDX: int
+    lm: LanguageModel
+    alphabet: List[str]
+    prune: float
 
 
 def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
@@ -41,39 +64,29 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
     BLANK = "%"
     alphabet = list(ascii_lowercase) + [" ", ">", BLANK]
     BLANK_IDX = alphabet.index(BLANK)
-    F = ctc.shape[1]
-    # just add an imaginative zero'th step (will make indexing more intuitive)
-    ctc = np.vstack((np.zeros(F), ctc))
-    search = Search(alpha,beta,BLANK,BLANK_IDX,lm,ctc,alphabet,prune)
-    T = ctc.shape[0]
 
-    # STEP 1: Initiliazation
+    search = Search(alpha, beta, BLANK, BLANK_IDX, lm, alphabet, prune)
+
     O = ""
-    pb_b, pNb_b = Counter(), Counter()
-    pb_b[O] = 1.0
-    pNb_b[O] = 0.0
+    pb_t, pNb_t = Counter(), Counter()
+    pb_t[O] = 1.0
+    pNb_t[O] = 0.0
     prefixes = [O]
-    # END: STEP 1
 
-    # STEP 2: Iterations and pruning
-    for time_step in range(1, T):
-        character_probs = ctc[time_step]
+    for character_probs in ctc:
+        pNb_t, pb_t = step(search, character_probs, pNb_t, pb_t, prefixes)
 
-        pNb_t, pb_t = step(search, character_probs, pNb_b, pb_b, prefixes)
-
-        # STEP 7: Select most probable prefixes
         A_next = pb_t + pNb_t
         sorter = lambda l: A_next[l] * (len(W(l)) + 1) ** search.beta
         prefixes = sorted(A_next, key=sorter, reverse=True)[:k]
-        # END: STEP 7
-        pb_b = pb_t
-        pNb_b = pNb_t
 
     return prefixes[0].strip(">")
 
 
-def step(search:Search, character_probs, pNb_b, pb_b, prefixes):
-    pruned_alphabet = [search.alphabet[i] for i in np.where(character_probs > search.prune)[0]]
+def step(search: Search, character_probs, pNb_b, pb_b, prefixes):
+    pruned_alphabet = [
+        search.alphabet[i] for i in np.where(character_probs > search.prune)[0]
+    ]
 
     pb_t, pNb_t = Counter(), Counter()
     for pref in prefixes:
@@ -117,7 +130,7 @@ def step(search:Search, character_probs, pNb_b, pb_b, prefixes):
                 if pref_ext not in prefixes:
                     blank_or_not_pref_ext = pb_b[pref_ext] + pNb_b[pref_ext]
                     pb_t[pref_ext] += (
-                            character_probs[search.BLANK_IDX] * blank_or_not_pref_ext
+                        character_probs[search.BLANK_IDX] * blank_or_not_pref_ext
                     )
                     pNb_t[pref_ext] += character_prob * pNb_b[pref_ext]
                 # END: STEP 6
