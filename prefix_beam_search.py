@@ -40,14 +40,20 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
     # END: STEP 1
 
     # STEP 2: Iterations and pruning
-    for t in range(1, T):
-        pruned_alphabet = [alphabet[i] for i in np.where(ctc[t] > prune)[0]]
+    for time_step in range(1, T):
+        character_probs = ctc[time_step]
+        pruned_alphabet = [alphabet[i] for i in np.where(character_probs > prune)[0]]
+        pb_t = Pb[time_step]
+        pNb_t = Pnb[time_step]
+        pb_b = Pb[time_step - 1]
+        pNb_b = Pnb[time_step - 1]
+
         for pref in prefixes:
 
             is_phrase_end = len(pref) > 0 and pref[-1] == ">"
             if is_phrase_end:
-                Pb[t][pref] = Pb[t - 1][pref]
-                Pnb[t][pref] = Pnb[t - 1][pref]
+                pb_t[pref] = pb_b[pref]
+                pNb_t[pref] = pNb_b[pref]
                 continue  # goto next prefix
 
             for c in pruned_alphabet:
@@ -55,43 +61,41 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
                 # END: STEP 2
 
                 # STEP 3: “Extending” with a blank
-                blank_or_not_prob = Pb[t - 1][pref] + Pnb[t - 1][pref]
+                blank_or_not_prob = pb_b[pref] + pNb_b[pref]
                 if c == BLANK:
-                    Pb[t][pref] += ctc[t][BLANK_IDX] * (blank_or_not_prob)
+                    pb_t[pref] += character_probs[BLANK_IDX] * blank_or_not_prob
                 # END: STEP 3
 
                 # STEP 4: Extending with the end character
                 else:
                     pref_ext = pref + c  # extended prefix
                     is_same_as_before = len(pref) > 0 and c == pref[-1]
-                    character_prob = ctc[t][c_ix]
+                    character_prob = character_probs[c_ix]
                     token_is_ending = len(pref.replace(" ", "")) > 0 and c in (" ", ">")
                     if is_same_as_before:
-                        Pnb[t][pref_ext] += character_prob * Pb[t - 1][pref]
-                        Pnb[t][pref] += character_prob * Pnb[t - 1][pref]
+                        pNb_t[pref_ext] += character_prob * pb_b[pref]
+                        pNb_t[pref] += character_prob * pNb_b[pref]
                     # END: STEP 4
 
                     # STEP 5: Extending with any other non-blank character and LM constraints
                     elif token_is_ending:
                         lm_prob = lm(pref_ext.strip(" >")) ** alpha
-                        Pnb[t][pref_ext] += (
-                            lm_prob * character_prob * (blank_or_not_prob)
-                        )
+                        pNb_t[pref_ext] += lm_prob * character_prob * blank_or_not_prob
                     else:  # within token
-                        Pnb[t][pref_ext] += character_prob * (blank_or_not_prob)
+                        pNb_t[pref_ext] += character_prob * blank_or_not_prob
                     # END: STEP 5
 
                     # STEP 6: Make use of discarded prefixes
                     if pref_ext not in prefixes:
-                        blank_or_not_pref_ext = (
-                            Pb[t - 1][pref_ext] + Pnb[t - 1][pref_ext]
+                        blank_or_not_pref_ext = pb_b[pref_ext] + pNb_b[pref_ext]
+                        pb_t[pref_ext] += (
+                            character_probs[BLANK_IDX] * blank_or_not_pref_ext
                         )
-                        Pb[t][pref_ext] += ctc[t][BLANK_IDX] * blank_or_not_pref_ext
-                        Pnb[t][pref_ext] += character_prob * Pnb[t - 1][pref_ext]
+                        pNb_t[pref_ext] += character_prob * pNb_b[pref_ext]
                     # END: STEP 6
 
         # STEP 7: Select most probable prefixes
-        A_next = Pb[t] + Pnb[t]
+        A_next = pb_t + pNb_t
         sorter = lambda l: A_next[l] * (len(W(l)) + 1) ** beta
         prefixes = sorted(A_next, key=sorter, reverse=True)[:k]
         # END: STEP 7
